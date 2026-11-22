@@ -1,12 +1,12 @@
 // The screenshot scenes behind ?shot=start|play|end. Each one plays the real
 // rules forward from a fresh world for a fixed number of steps, steered by a
 // simple autopilot, so the frame is what a short game really looks like and
-// the same seed always gives the same frame. The play pilot is bold enough to
-// get spotted once in a while, so the alarm meter shows a reading; the end
-// pilot is reckless, so it gets caught, as a hurried player is.
-import { STEP } from './config.js';
-import { EVENT_CLEAR, EVENT_OVER } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE, SCREEN_VICTORY } from './render.js';
+// the same seed always gives the same frame. The play pilot is careful enough
+// to dodge most cones, so the alarm meter shows a reading; the end pilot is
+// reckless, so it gets caught, as a hurried player is.
+import { TICK } from './config.js';
+import { EV } from './world.js';
+import { Screens } from './render.js';
 
 const START_SECONDS = 5;
 const PLAY_SECONDS = 24;
@@ -16,7 +16,7 @@ const COLS = 32; // 1280 / 40
 const ROWS = 18; // 720 / 40
 
 /** The thief's next target: the nearest loot still on the floor, the diamond included. */
-function targetOf(state) {
+function pickTarget(state) {
   let best = null;
   let bestD = Infinity;
   const consider = (x, y, weight) => {
@@ -45,7 +45,7 @@ const cellKey = (cx, cy) => cy * COLS + cx;
  * target itself when already close. Deterministic: neighbours are tried in a
  * fixed order.
  */
-function nextStep(world, target) {
+function pathStep(world, target) {
   const s = world.state;
   const [sx, sy] = cellOf(s.player.x, s.player.y);
   const [tx, ty] = cellOf(target.x, target.y);
@@ -92,8 +92,8 @@ function nextStep(world, target) {
  */
 function autopilot(world, reckless) {
   const s = world.state;
-  const target = targetOf(s);
-  const step = nextStep(world, target);
+  const target = pickTarget(s);
+  const step = pathStep(world, target);
   if (step === null) return { x: 0, y: 0 };
   const dx = step.x - s.player.x;
   const dy = step.y - s.player.y;
@@ -130,26 +130,26 @@ function autopilot(world, reckless) {
  * Set `world` to the named scene (start, play or end; any other name is start)
  * and return the screen to draw over it and the best score to show.
  */
-export function stageShot(name, world) {
+export function stageScene(name, world) {
   world.reset(0, false);
   if (name !== 'play' && name !== 'end') {
-    for (let i = 0; i < START_SECONDS / STEP; i++) world.step(STEP, { x: 0, y: 0 }, { ambient: true });
+    for (let i = 0; i < START_SECONDS / TICK; i++) world.step(TICK, { x: 0, y: 0 }, { ambient: true });
     // Freeze the clock where the title's "press space" prompt is lit, so the
     // cover always shows it.
     world.state.time = 4;
-    return { screen: SCREEN_TITLE, best: 0 };
+    return { screen: Screens.title, best: 0 };
   }
   const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
   const reckless = name === 'end';
-  for (let i = 0; i < limit / STEP; i++) {
-    const events = world.step(STEP, autopilot(world, reckless), {});
-    if (events & EVENT_OVER) break;
-    if (events & EVENT_CLEAR) {
+  for (let i = 0; i < limit / TICK; i++) {
+    const events = world.step(TICK, autopilot(world, reckless), {});
+    if (events & EV.over) break;
+    if (events & EV.clear) {
       if (world.state.phase === 'victory') break;
       world.nextLevel();
     }
   }
-  if (world.state.phase === 'over') return { screen: SCREEN_OVER, best: world.state.score };
-  if (world.state.phase === 'victory') return { screen: SCREEN_VICTORY, best: world.state.score };
-  return { screen: SCREEN_PLAY, best: world.state.score };
+  if (world.state.phase === 'over') return { screen: Screens.over, best: world.state.score };
+  if (world.state.phase === 'victory') return { screen: Screens.victory, best: world.state.score };
+  return { screen: Screens.play, best: world.state.score };
 }

@@ -1,52 +1,53 @@
-// Midnight Vault: every tuning number and colour in one place.
-// The playfield is a fixed 1280x720 logical area; the HUD lives in the top wall band.
-export const FIELD = { width: 1280, height: 720 };
-export const WALL = 48; // border thickness (the room is WALL..FIELD.width-WALL)
-export const STEP = 1 / 60;
+// Midnight Vault — every tuning number and colour in one place.
+// The room is a fixed 1280x720 logical area; the HUD sits in the top wall band.
+export const ROOM = { width: 1280, height: 720 };
+export const BORDER = 48; // wall thickness; the open floor is BORDER..width-BORDER
+export const TICK = 1 / 60; // the world advances in fixed 1/60 s steps
 export const LIVES = 3;
 export const BEST_KEY = 'midnight-vault-best';
-export const PLAYER = { radius: 12, walk: 178, sneak: 102 };
-export const GUARD = { radius: 13, chase: 148, coneRange: 235, coneHalf: 0.62 };
-export const CAMERA = { range: 275, half: 0.5 };
-export const ALARM_RISE = 34; // alarm points per second, per spotter, at point blank
-export const ALARM_FALL = 9; // alarm points per second while unseen
-export const ALARM_TIME = 4; // seconds guards chase once the alarm hits 100
-export const CAUGHT_DIST = 26;
-export const LOOT_DIST = 26;
-export const DIAMOND_DIST = 32;
-export const SNEAK_SEEN = 0.45; // detection multiplier while sneaking
 
-export const COLORS = {
+export const THIEF = { radius: 12, walk: 178, sneak: 102 };
+export const SENTRY = { radius: 13, chase: 148, viewRange: 235, viewHalf: 0.62 };
+export const LENS = { range: 275, half: 0.5 }; // wall cameras
+export const ALARM_RISE = 34; // alarm points per second, per spotter, at point blank
+export const ALARM_FALL = 9; // alarm points per second while nobody sees the thief
+export const HUNT_TIME = 4; // seconds the guards chase once the alarm hits 100
+export const CATCH_DIST = 26;
+export const LOOT_DIST = 26;
+export const GEM_DIST = 32;
+export const SNEAK_FACTOR = 0.45; // detection multiplier while sneaking
+
+export const PALETTE = {
   floorA: '#232a3d',
   floorB: '#1d2334',
   wall: '#0d1020',
-  wallTrim: '#c9a227',
-  caseGlass: '#3d5a73',
-  caseEdge: '#8fb4d6',
+  trim: '#c9a227',
+  glass: '#3d5a73',
+  glassEdge: '#8fb4d6',
   vault: '#4a3f1e',
-  vaultTrim: '#ffd94a',
+  vaultGold: '#ffd94a',
   exit: '#1d7a4a',
   exitText: '#b8ffce',
   guard: '#2e4a8f',
   guardCap: '#1c2f5e',
   coneCalm: 'rgba(255, 205, 70, 0.16)',
-  coneSeen: 'rgba(255, 70, 70, 0.30)',
-  cameraCone: 'rgba(110, 170, 255, 0.15)',
+  coneHot: 'rgba(255, 70, 70, 0.30)',
+  camCone: 'rgba(110, 170, 255, 0.15)',
   thief: '#101014',
-  thiefMask: '#f2f2f2',
+  mask: '#f2f2f2',
   coin: '#ffd94a',
   bag: '#b07a3a',
-  diamond: '#7fe7ff',
+  gem: '#7fe7ff',
   text: '#f4f1e6',
   dim: '#9aa3b5',
-  alarmLow: '#59d867',
-  alarmMid: '#ffd94a',
-  alarmHigh: '#ff5252',
+  ok: '#59d867',
+  warn: '#ffd94a',
+  bad: '#ff5252',
 };
 
-// One level: display cases block movement and sight; guards walk waypoint loops;
-// cameras sit on the walls and sweep; coins and bags are side loot, the diamond
-// is the vault target, and the exit is the door in the bottom wall.
+// A level: display cases block movement and sight, guards walk waypoint loops,
+// cameras sit on the walls and sweep, coins and bags are side loot, the
+// diamond is the vault target and the exit is the door in the bottom wall.
 export const LEVELS = [
   {
     name: '1 · The Gallery',

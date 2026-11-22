@@ -6,30 +6,13 @@
 // ?seed=N fixes the world. ?shot=start|play|end (with &seed=N) stages that
 // scene instead of running the loop, paints it twice and sets
 // window.__shotReady for a screenshot.
-import { BEST_KEY, LIVES, STEP } from './config.js';
-import { createRandom } from './random.js';
-import {
-  EVENT_ALARM,
-  EVENT_CAUGHT,
-  EVENT_CLEAR,
-  EVENT_DIAMOND,
-  EVENT_LOOT,
-  EVENT_OVER,
-  EVENT_VICTORY,
-  createWorld,
-} from './world.js';
-import { ACTION_CONFIRM, ACTION_MUTE, ACTION_PAUSE, createInput } from './input.js';
-import { createAudio } from './audio.js';
-import {
-  SCREEN_CLEAR,
-  SCREEN_OVER,
-  SCREEN_PAUSED,
-  SCREEN_PLAY,
-  SCREEN_TITLE,
-  SCREEN_VICTORY,
-  createRenderer,
-} from './render.js';
-import { stageShot } from './shots.js';
+import { BEST_KEY, LIVES, TICK } from './config.js';
+import { makeRng } from './random.js';
+import { EV, buildWorld } from './world.js';
+import { ACT, makeInput } from './input.js';
+import { makeAudio } from './audio.js';
+import { Screens, makeRenderer } from './render.js';
+import { stageScene } from './shots.js';
 
 /** The longest frame the loop catches up on; a longer stall (a hidden tab) is dropped, not replayed. */
 const MAX_FRAME = 0.25;
@@ -41,9 +24,9 @@ const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() 
 
 const canvas = document.getElementById('game');
 const status = document.getElementById('status');
-const world = createWorld(createRandom(seed));
-const renderer = createRenderer(canvas);
-const audio = createAudio();
+const world = buildWorld(makeRng(seed));
+const renderer = makeRenderer(canvas);
+const audio = makeAudio();
 
 function readBest() {
   try {
@@ -62,7 +45,7 @@ function saveBest(value) {
 }
 
 function runShot(name) {
-  const scene = stageShot(name, world);
+  const scene = stageScene(name, world);
   let painted = 0;
   function paint() {
     renderer.draw(world.state, scene.screen, scene.best);
@@ -74,8 +57,8 @@ function runShot(name) {
 }
 
 function runGame() {
-  const input = createInput(canvas);
-  let screen = SCREEN_TITLE;
+  const input = makeInput(canvas);
+  let screen = Screens.title;
   let best = readBest();
   let accumulator = 0;
   let last = performance.now();
@@ -88,33 +71,33 @@ function runGame() {
   function startGame() {
     world.reset(0, false);
     accumulator = 0;
-    screen = SCREEN_PLAY;
+    screen = Screens.play;
     announce(`Playing. ${LIVES} lives.`);
   }
 
   function handleEvents(events) {
-    if (events & EVENT_LOOT) audio.pickup();
-    if (events & EVENT_DIAMOND) audio.diamond();
-    if (events & EVENT_ALARM) announce('Alarm! The guards are hunting you.');
-    if (events & EVENT_CAUGHT) {
+    if (events & EV.loot) audio.pickup();
+    if (events & EV.diamond) audio.diamond();
+    if (events & EV.alarm) announce('Alarm! The guards are hunting you.');
+    if (events & EV.caught) {
       audio.caught();
       announce(world.state.lives === 1 ? 'Caught. 1 life left.' : `Caught. ${world.state.lives} lives left.`);
     }
-    if (events & EVENT_CLEAR) {
+    if (events & EV.clear) {
       audio.clear();
-      screen = SCREEN_CLEAR;
+      screen = Screens.clear;
       announce(`Level clear. Score ${world.state.score}.`);
     }
-    if (events & EVENT_OVER) {
-      screen = SCREEN_OVER;
+    if (events & EV.over) {
+      screen = Screens.over;
       if (world.state.score > best) {
         best = world.state.score;
         saveBest(best);
       }
       announce(`Game over. Score ${world.state.score}. Best ${best}.`);
     }
-    if (events & EVENT_VICTORY) {
-      screen = SCREEN_VICTORY;
+    if (events & EV.victory) {
+      screen = Screens.victory;
       if (world.state.score > best) {
         best = world.state.score;
         saveBest(best);
@@ -125,38 +108,38 @@ function runGame() {
 
   function handleActions() {
     const actions = input.takeActions();
-    if (actions & ACTION_MUTE) {
+    if (actions & ACT.mute) {
       audio.toggleMute();
       announce(audio.muted ? 'Muted.' : 'Sound on.');
     }
-    if (actions & ACTION_CONFIRM) {
+    if (actions & ACT.confirm) {
       audio.unlock();
       audio.click();
-      if (screen === SCREEN_TITLE || screen === SCREEN_OVER || screen === SCREEN_VICTORY) startGame();
-      else if (screen === SCREEN_CLEAR) {
+      if (screen === Screens.title || screen === Screens.over || screen === Screens.victory) startGame();
+      else if (screen === Screens.clear) {
         world.nextLevel();
-        screen = SCREEN_PLAY;
+        screen = Screens.play;
         announce('Playing.');
-      } else if (screen === SCREEN_PAUSED) {
-        screen = SCREEN_PLAY;
+      } else if (screen === Screens.paused) {
+        screen = Screens.play;
         announce('Playing.');
       }
-    } else if (actions & ACTION_PAUSE && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
+    } else if (actions & ACT.pause && screen === Screens.play) {
+      screen = Screens.paused;
       announce('Paused.');
-    } else if (actions & ACTION_PAUSE && screen === SCREEN_PAUSED) {
-      screen = SCREEN_PLAY;
+    } else if (actions & ACT.pause && screen === Screens.paused) {
+      screen = Screens.play;
       announce('Playing.');
     }
   }
 
   function step() {
-    if (screen === SCREEN_TITLE) {
-      world.step(STEP, { x: 0, y: 0 }, { ambient: true });
+    if (screen === Screens.title) {
+      world.step(TICK, { x: 0, y: 0 }, { ambient: true });
       return;
     }
     const throwAt = input.takeThrow();
-    const events = world.step(STEP, input.direction(), { sneak: input.sneaking(), throwAt });
+    const events = world.step(TICK, input.move(), { sneak: input.sneaking(), throwAt });
     if (world.state.alarm > 70) audio.alarm(performance.now());
     handleEvents(events);
   }
@@ -166,11 +149,11 @@ function runGame() {
     accumulator += Math.min((now - last) / 1000, MAX_FRAME);
     last = now;
     handleActions();
-    if (screen === SCREEN_TITLE || screen === SCREEN_PLAY) {
+    if (screen === Screens.title || screen === Screens.play) {
       let guard = 0;
-      while (accumulator >= STEP && (screen === SCREEN_TITLE || screen === SCREEN_PLAY) && guard < 40) {
+      while (accumulator >= TICK && (screen === Screens.title || screen === Screens.play) && guard < 40) {
         step();
-        accumulator -= STEP;
+        accumulator -= TICK;
         guard += 1;
       }
       if (guard >= 40) accumulator = 0;
@@ -182,8 +165,8 @@ function runGame() {
 
   // Leaving the tab pauses a running game rather than letting guards close in unseen.
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
+    if (document.hidden && screen === Screens.play) {
+      screen = Screens.paused;
       announce('Paused.');
     }
   });
