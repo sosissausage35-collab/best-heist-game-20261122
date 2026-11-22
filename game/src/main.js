@@ -1,18 +1,35 @@
-// Boot and the one loop: input is read every frame, the world advances in
+// Boot and the one loop: input is read every frame, the heist advances in
 // fixed 1/60 s steps (several in a slow frame, none in a fast one), and the
-// renderer paints what is there. The game moves between six screens: title,
+// painter paints what is there. The game moves between six screens: title,
 // play, paused, level clear, game over and victory.
 //
-// ?seed=N fixes the world. ?shot=start|play|end (with &seed=N) stages that
-// scene instead of running the loop, paints it twice and sets
+// ?seed=N fixes the random pattern. ?shot=start|play|end (with &seed=N)
+// stages that scene instead of running the loop, paints it twice and sets
 // window.__shotReady for a screenshot.
-import { BEST_KEY, LIVES, TICK } from './config.js';
-import { makeRng } from './random.js';
-import { EV, buildWorld } from './world.js';
-import { ACT, makeInput } from './input.js';
-import { makeAudio } from './audio.js';
-import { Screens, makeRenderer } from './render.js';
-import { stageScene } from './shots.js';
+import { BEST_KEY, LIVES, STEP } from './settings.js';
+import { seededRandom } from './rng.js';
+import {
+  EV_CAUGHT,
+  EV_CHASE,
+  EV_CLEAR,
+  EV_DIAMOND,
+  EV_OVER,
+  EV_PICKUP,
+  EV_TOSS,
+  createHeist,
+} from './heist.js';
+import { ACT_CONFIRM, ACT_MUTE, ACT_PAUSE, readKeys } from './keys.js';
+import { makeSound } from './sound.js';
+import {
+  VIEW_CLEAR,
+  VIEW_OVER,
+  VIEW_PAUSED,
+  VIEW_PLAY,
+  VIEW_TITLE,
+  VIEW_WIN,
+  makePainter,
+} from './draw.js';
+import { stageScene } from './scenes.js';
 
 /** The longest frame the loop catches up on; a longer stall (a hidden tab) is dropped, not replayed. */
 const MAX_FRAME = 0.25;
@@ -24,9 +41,9 @@ const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() 
 
 const canvas = document.getElementById('game');
 const status = document.getElementById('status');
-const world = buildWorld(makeRng(seed));
-const renderer = makeRenderer(canvas);
-const audio = makeAudio();
+const heist = createHeist(seededRandom(seed));
+const painter = makePainter(canvas);
+const sound = makeSound();
 
 function readBest() {
   try {
@@ -45,10 +62,10 @@ function saveBest(value) {
 }
 
 function runShot(name) {
-  const scene = stageScene(name, world);
+  const scene = stageScene(name, heist);
   let painted = 0;
   function paint() {
-    renderer.draw(world.state, scene.screen, scene.best);
+    painter.paint(heist.state, scene.screen, scene.best, false);
     painted += 1;
     if (painted < 2) requestAnimationFrame(paint);
     else window.__shotReady = true;
@@ -57,91 +74,92 @@ function runShot(name) {
 }
 
 function runGame() {
-  const input = makeInput(canvas);
-  let screen = Screens.title;
+  const keys = readKeys(canvas);
+  let screen = VIEW_TITLE;
   let best = readBest();
   let accumulator = 0;
   let last = performance.now();
 
-  // Screen readers (and anyone watching the page's text) hear the screen changes and each catch.
+  // Screen readers (and anyone watching the page's text) hear the screen changes and each hit.
   function announce(message) {
     status.textContent = message;
   }
 
   function startGame() {
-    world.reset(0, false);
+    sound.unlock();
+    heist.reset();
     accumulator = 0;
-    screen = Screens.play;
+    screen = VIEW_PLAY;
     announce(`Playing. ${LIVES} lives.`);
   }
 
-  function handleEvents(events) {
-    if (events & EV.loot) audio.pickup();
-    if (events & EV.diamond) audio.diamond();
-    if (events & EV.alarm) announce('Alarm! The guards are hunting you.');
-    if (events & EV.caught) {
-      audio.caught();
-      announce(world.state.lives === 1 ? 'Caught. 1 life left.' : `Caught. ${world.state.lives} lives left.`);
+  function endGame() {
+    screen = VIEW_OVER;
+    if (heist.state.score > best) {
+      best = heist.state.score;
+      saveBest(best);
     }
-    if (events & EV.clear) {
-      audio.clear();
-      screen = Screens.clear;
-      announce(`Level clear. Score ${world.state.score}.`);
+    announce(`Game over. Score ${heist.state.score}. Best ${best}.`);
+  }
+
+  function clearLevel() {
+    screen = VIEW_CLEAR;
+    sound.clear();
+    announce(`Level clear. Score ${heist.state.score}.`);
+  }
+
+  function winGame() {
+    screen = VIEW_WIN;
+    sound.win();
+    if (heist.state.score > best) {
+      best = heist.state.score;
+      saveBest(best);
     }
-    if (events & EV.over) {
-      screen = Screens.over;
-      if (world.state.score > best) {
-        best = world.state.score;
-        saveBest(best);
-      }
-      announce(`Game over. Score ${world.state.score}. Best ${best}.`);
-    }
-    if (events & EV.victory) {
-      screen = Screens.victory;
-      if (world.state.score > best) {
-        best = world.state.score;
-        saveBest(best);
-      }
-      announce(`The perfect heist. Score ${world.state.score}.`);
-    }
+    announce(`Clean getaway. Score ${heist.state.score}. Best ${best}.`);
   }
 
   function handleActions() {
-    const actions = input.takeActions();
-    if (actions & ACT.mute) {
-      audio.toggleMute();
-      announce(audio.muted ? 'Muted.' : 'Sound on.');
+    const actions = keys.takeActions();
+    if (actions & ACT_MUTE) {
+      const muted = sound.toggleMute();
+      announce(muted ? 'Muted.' : 'Sound on.');
     }
-    if (actions & ACT.confirm) {
-      audio.unlock();
-      audio.click();
-      if (screen === Screens.title || screen === Screens.over || screen === Screens.victory) startGame();
-      else if (screen === Screens.clear) {
-        world.nextLevel();
-        screen = Screens.play;
-        announce('Playing.');
-      } else if (screen === Screens.paused) {
-        screen = Screens.play;
-        announce('Playing.');
-      }
-    } else if (actions & ACT.pause && screen === Screens.play) {
-      screen = Screens.paused;
+    if (actions & ACT_CONFIRM && (screen === VIEW_TITLE || screen === VIEW_OVER || screen === VIEW_WIN)) {
+      startGame();
+    } else if (actions & ACT_CONFIRM && screen === VIEW_CLEAR) {
+      heist.nextLevel();
+      screen = VIEW_PLAY;
+      announce('Playing.');
+    } else if (actions & ACT_PAUSE && screen === VIEW_PLAY) {
+      screen = VIEW_PAUSED;
       announce('Paused.');
-    } else if (actions & ACT.pause && screen === Screens.paused) {
-      screen = Screens.play;
+    } else if (actions & (ACT_PAUSE | ACT_CONFIRM) && screen === VIEW_PAUSED) {
+      screen = VIEW_PLAY;
       announce('Playing.');
     }
   }
 
   function step() {
-    if (screen === Screens.title) {
-      world.step(TICK, { x: 0, y: 0 }, { ambient: true });
+    if (screen === VIEW_TITLE) {
+      heist.step(STEP, { x: 0, y: 0 }, false, null, true);
       return;
     }
-    const throwAt = input.takeThrow();
-    const events = world.step(TICK, input.move(), { sneak: input.sneaking(), throwAt });
-    if (world.state.alarm > 70) audio.alarm(performance.now());
-    handleEvents(events);
+    const click = keys.takeClick();
+    const toss = click ? painter.clientToArena(click.x, click.y) : null;
+    const events = heist.step(STEP, keys.steer(), keys.sneaking(), toss, false);
+    if (events & EV_PICKUP) sound.coin();
+    if (events & EV_DIAMOND) sound.diamond();
+    if (events & EV_TOSS) sound.toss();
+    if (events & EV_CHASE) sound.spotted();
+    if (events & EV_CAUGHT) {
+      sound.caught();
+      announce(heist.state.lives === 1 ? 'Caught. 1 life left.' : `Caught. ${heist.state.lives} lives left.`);
+    }
+    if (events & EV_OVER) endGame();
+    else if (events & EV_CLEAR) {
+      if (heist.state.phase === 'win') winGame();
+      else clearLevel();
+    }
   }
 
   function frame(now) {
@@ -149,24 +167,21 @@ function runGame() {
     accumulator += Math.min((now - last) / 1000, MAX_FRAME);
     last = now;
     handleActions();
-    if (screen === Screens.title || screen === Screens.play) {
-      let guard = 0;
-      while (accumulator >= TICK && (screen === Screens.title || screen === Screens.play) && guard < 40) {
+    if (screen === VIEW_TITLE || screen === VIEW_PLAY) {
+      while (accumulator >= STEP && (screen === VIEW_TITLE || screen === VIEW_PLAY)) {
         step();
-        accumulator -= TICK;
-        guard += 1;
+        accumulator -= STEP;
       }
-      if (guard >= 40) accumulator = 0;
     } else {
       accumulator = 0;
     }
-    renderer.draw(world.state, screen, best);
+    painter.paint(heist.state, screen, best, keys.sneaking());
   }
 
-  // Leaving the tab pauses a running game rather than letting guards close in unseen.
+  // Leaving the tab pauses a running game rather than letting the alarm rise unseen.
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === Screens.play) {
-      screen = Screens.paused;
+    if (document.hidden && screen === VIEW_PLAY) {
+      screen = VIEW_PAUSED;
       announce('Paused.');
     }
   });
